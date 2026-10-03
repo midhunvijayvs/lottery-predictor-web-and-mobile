@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lottery Analyzer</title>
+  <meta name="description" content="Kerala lottery result digit-frequency analyzer">
+  <meta name="theme-color" content="#222222">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="top">
+    <img class="banner" src="image.png" alt="Lottery banner">
+    <div class="titlebar">
+      <h1>Lottery Analyzer</h1>
+      <button id="installBtn" class="btn small ghost" hidden>Install app</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card controls">
+      <div class="row">
+        <label for="fileCount">No. of Files</label>
+        <input id="fileCount" type="number" inputmode="numeric" min="1" max="50" value="7">
+      </div>
+      <div class="row">
+        <label for="startSerial">Start Serial No</label>
+        <input id="startSerial" type="number" inputmode="numeric" min="1" value="74890">
+      </div>
+
+      <div class="btns">
+        <button id="updateBtn" class="btn">Update PDF Files</button>
+        <button id="addBtn" class="btn">Add PDFs from phone</button>
+        <button id="analyzeBtn" class="btn primary">Analyze!</button>
+        <button id="lastBtn" class="btn">Show Last Result!</button>
+      </div>
+      <input id="filePicker" type="file" accept="application/pdf,.pdf" multiple hidden>
+
+      <div class="files">
+        <div class="files-head">
+          <span>Stored PDF files</span>
+          <span id="fileSummary" class="muted">none</span>
+        </div>
+        <ol id="fileList" class="file-list"></ol>
+      </div>
+
+      <div class="btns secondary">
+        <button id="clearBtn" class="btn">Clear Screen</button>
+        <button id="settingsBtn" class="btn grey">Settings</button>
+      </div>
+
+      <a class="link" href="https://www.statelottery.kerala.gov.in/index.php/lottery-result-view" target="_blank" rel="noopener">&gt;&gt;&gt; Goto Kerala Lottery Result official page</a>
+    </section>
+
+    <section id="manualBox" class="card manual" hidden>
+      <h2>Download blocked by the result website</h2>
+      <p>The result site doesn't allow direct downloads from other web pages. Tap each link below, save the PDF to your phone, then tap <b>Add PDFs from phone</b> and pick them (in order).</p>
+      <ol id="manualLinks"></ol>
+      <p class="muted">Tip: set a download proxy in Settings to make <b>Update PDF Files</b> work automatically.</p>
+    </section>
+
+    <section id="resultBox" class="card result" hidden>
+      <h2>Final Result</h2>
+      <div class="table-wrap">
+        <table id="resultTable">
+          <thead><tr><th>Digit</th><th>D3<small>1000s</small></th><th>D2<small>100s</small></th><th>D1<small>10s</small></th><th>D0<small>units</small></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="picks">
+        <div><span class="label">Most repeated</span><span id="mostDigits" class="digits"></span></div>
+        <div><span class="label">Second most</span><span id="secondDigits" class="digits"></span></div>
+      </div>
+      <h3>Positional Combinations</h3>
+      <div id="combos" class="combos"></div>
+      <h3>Digit Analysis Plots</h3>
+      <div class="charts">
+        <figure><figcaption>Thousands (D3)</figcaption><canvas data-pos="D3"></canvas></figure>
+        <figure><figcaption>Hundreds (D2)</figcaption><canvas data-pos="D2"></canvas></figure>
+        <figure><figcaption>Tens (D1)</figcaption><canvas data-pos="D1"></canvas></figure>
+        <figure><figcaption>Units (D0)</figcaption><canvas data-pos="D0"></canvas></figure>
+      </div>
+      <div id="tip" class="tip" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>Output</h2>
+      <div id="output" class="output" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <dialog id="settingsDlg">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <fieldset>
+        <legend>Analysis mode</legend>
+        <label><input type="radio" name="mode" value="1" checked> Full result Analyze</label>
+        <label><input type="radio" name="mode" value="2"> 4th Prize Analyze</label>
+        <label><input type="radio" name="mode" value="3"> 5th Prize Analyze</label>
+        <p class="muted">Same as the desktop app: only "Full result" is implemented for now.</p>
+      </fieldset>
+      <fieldset>
+        <legend>Download proxy (optional)</legend>
+        <input id="proxyUrl" type="url" placeholder="https://your-worker.workers.dev/?url=">
+        <p class="muted">The result URL is appended (URL-encoded) to this prefix. See <code>proxy/cloudflare-worker.js</code> in the project to set up your own free proxy.</p>
+      </fieldset>
+      <div class="btns">
+        <button value="cancel" class="btn grey">Cancel</button>
+        <button id="saveSettings" value="save" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

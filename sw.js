@@ -1,6 +1,6 @@
 // Service worker: caches the app so it opens offline and is installable.
 // Bump VERSION whenever you change any app file, so phones pick up the update.
-const VERSION = "lottery-analyzer-v2";
+const VERSION = "lottery-analyzer-v3";
 const ASSETS = [
   "./",
   "index.html",
@@ -28,16 +28,17 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// Network-first: always try to get the latest version from GitHub Pages,
+// fall back to the cached copy only when offline.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return; // never cache lottery downloads
+  if (e.request.method !== "GET" || url.origin !== location.origin) return; // never touch lottery/proxy downloads
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) =>
-      hit || fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((c) => c.put(e.request, copy));
+    fetch(e.request, { cache: "no-cache" })
+      .then((res) => {
+        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
         return res;
       })
-    )
+      .catch(() => caches.match(e.request, { ignoreSearch: true }))
   );
 });

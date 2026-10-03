@@ -109,16 +109,16 @@ async function fetchPdf(url) {
   // Proxy first (the result site blocks direct browser downloads), direct fetch as a fallback
   const proxy = (LS.get("settings", {}).proxy || "").trim() || core.DEFAULT_PROXY;
   const attempts = [() => fetch(proxy + encodeURIComponent(url)), () => fetch(url, { mode: "cors" })];
-  let lastErr;
-  for (const go of attempts) {
+  const errs = [];
+  for (const [n, go] of attempts.entries()) {
     try {
       const r = await go();
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const buf = await r.arrayBuffer();
       return { buf, type: r.headers.get("Content-Type") || "" };
-    } catch (e) { lastErr = e; }
+    } catch (e) { errs.push(`${n === 0 ? "via proxy" : "direct"}: ${e.message || e}`); }
   }
-  throw lastErr;
+  throw new Error(errs.join(" | "));
 }
 
 async function updatePdfFiles() {

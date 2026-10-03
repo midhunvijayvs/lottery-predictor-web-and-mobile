@@ -4,6 +4,9 @@
 export const RESULT_URL = (serial) =>
   `https://result.keralalotteries.com/viewlotisresult.php?drawserial=${serial}`;
 
+// Cloudflare Worker that downloads the result PDFs for the browser (see proxy/cloudflare-worker.js)
+export const DEFAULT_PROXY = "https://lottery-proxy.midhunvijayvs.workers.dev/?url=";
+
 export const EXPECTED_PER_FILE = 606;
 
 // split_to_words_and_filter_numbers: split on whitespace, keep pure-digit words

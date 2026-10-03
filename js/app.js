@@ -106,9 +106,9 @@ function isPdf(buf) {
   return String.fromCharCode(...b) === "%PDF-";
 }
 async function fetchPdf(url) {
-  const proxy = LS.get("settings", {}).proxy?.trim();
-  const attempts = [() => fetch(url, { mode: "cors" })];
-  if (proxy) attempts.push(() => fetch(proxy + encodeURIComponent(url)));
+  // Proxy first (the result site blocks direct browser downloads), direct fetch as a fallback
+  const proxy = (LS.get("settings", {}).proxy || "").trim() || core.DEFAULT_PROXY;
+  const attempts = [() => fetch(proxy + encodeURIComponent(url)), () => fetch(url, { mode: "cors" })];
   let lastErr;
   for (const go of attempts) {
     try {
@@ -380,6 +380,7 @@ function openSettings() {
   const s = LS.get("settings", { mode: "1", proxy: "" });
   document.querySelectorAll("input[name=mode]").forEach((r) => (r.checked = r.value === s.mode));
   $("proxyUrl").value = s.proxy || "";
+  $("proxyUrl").placeholder = core.DEFAULT_PROXY;
   $("settingsDlg").showModal();
 }
 $("settingsDlg").addEventListener("close", () => {

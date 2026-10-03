@@ -58,10 +58,10 @@
     </section>
 
     <section id="manualBox" class="card manual" hidden>
-      <h2>Download blocked by the result website</h2>
-      <p>The result site doesn't allow direct downloads from other web pages. Tap each link below, save the PDF to your phone, then tap <b>Add PDFs from phone</b> and pick them (in order).</p>
+      <h2>Some PDFs could not be downloaded</h2>
+      <p>The download failed for these draws (the draw may not exist yet, or the proxy/site is down). You can tap each link below, save the PDF to your phone, then tap <b>Add PDFs from phone</b> and pick them (in order).</p>
       <ol id="manualLinks"></ol>
-      <p class="muted">Tip: set a download proxy in Settings to make <b>Update PDF Files</b> work automatically.</p>
+      <p class="muted">If this keeps happening, check that the Cloudflare download proxy is running (Settings → Download proxy).</p>
     </section>
 
     <section id="resultBox" class="card result" hidden>
@@ -105,9 +105,9 @@
         <p class="muted">Same as the desktop app: only "Full result" is implemented for now.</p>
       </fieldset>
       <fieldset>
-        <legend>Download proxy (optional)</legend>
-        <input id="proxyUrl" type="url" placeholder="https://your-worker.workers.dev/?url=">
-        <p class="muted">The result URL is appended (URL-encoded) to this prefix. See <code>proxy/cloudflare-worker.js</code> in the project to set up your own free proxy.</p>
+        <legend>Download proxy</legend>
+        <input id="proxyUrl" type="url" placeholder="https://lottery-proxy.midhunvijayvs.workers.dev/?url=">
+        <p class="muted">The result URL is appended (URL-encoded) to this prefix. Leave empty to use the built-in proxy (lottery-proxy.midhunvijayvs.workers.dev). See <code>proxy/cloudflare-worker.js</code> in the project to set up your own free proxy.</p>
       </fieldset>
       <div class="btns">
         <button value="cancel" class="btn grey">Cancel</button>

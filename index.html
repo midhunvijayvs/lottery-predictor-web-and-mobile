@@ -65,6 +65,20 @@
       <button id="analyzeBtn" class="btn primary full">Analyze!</button>
 
       <hr>
+      <h2>Backtest</h2>
+      <p class="muted hint">Checks how your 16 combinations would have scored on past draws, compared with random guessing.</p>
+      <div class="row">
+        <label for="btWindow">Window (draws per prediction)</label>
+        <input id="btWindow" type="number" inputmode="numeric" min="1" max="60" placeholder="7">
+      </div>
+      <div class="row">
+        <label for="btTests">Past draws to test</label>
+        <input id="btTests" type="number" inputmode="numeric" min="10" max="2000" value="300">
+      </div>
+      <label class="check"><input id="btCompare" type="checkbox"> Compare windows 3 / 7 / 15 / 30</label>
+      <button id="btBtn" class="btn full">Run Backtest</button>
+
+      <hr>
       <div class="files">
         <div class="files-head">
           <h2>Stored PDF files</h2>
@@ -79,6 +93,19 @@
       </div>
 
       <a class="link" href="https://www.statelottery.kerala.gov.in/index.php/lottery-result-view" target="_blank" rel="noopener">&gt;&gt;&gt; Goto Kerala Lottery Result official page</a>
+    </section>
+
+    <section id="btBox" class="card" hidden>
+      <h2>Backtest Result</h2>
+      <p id="btMeta" class="muted"></p>
+      <div class="table-wrap">
+        <table id="btTable" class="bt">
+          <thead><tr><th>Window</th><th>Hits</th><th>Random</th><th>z</th><th>Verdict</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="btSummary" class="bt-summary"></p>
+      <p class="muted">z = how many "luck units" above (+) or below (−) random guessing. Between −2 and +2 is normal luck. Only a result that stays at +2 or more on new draws would mean something.</p>
     </section>
 
     <section id="resultBox" class="card result" hidden>
@@ -125,6 +152,11 @@
         <legend>Download proxy</legend>
         <input id="proxyUrl" type="url" placeholder="https://lottery-proxy.midhunvijayvs.workers.dev/?url=">
         <p class="muted">The result URL is appended (URL-encoded) to this prefix. Leave empty to use the built-in proxy (lottery-proxy.midhunvijayvs.workers.dev). See <code>proxy/cloudflare-worker.js</code> in the project to set up your own free proxy.</p>
+      </fieldset>
+      <fieldset>
+        <legend>Saved draws</legend>
+        <p id="archiveInfo" class="muted">…</p>
+        <button id="clearArchive" type="button" class="btn grey small">Delete saved draws</button>
       </fieldset>
       <div class="btns">
         <button value="cancel" class="btn grey">Cancel</button>

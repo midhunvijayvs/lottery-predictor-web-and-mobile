@@ -19,30 +19,38 @@ Verified: on the same 7 PDFs, the web version gives exactly the same result as t
 ## Getting the PDFs
 
 * **Update PDF files with latest n Results** (n = No. of Files) finds the newest published draw by itself,
-  then downloads the latest n draws. The app estimates today's serial from the date (one draw per day),
+  then selects the latest n draws. The app estimates today's serial from the date (one draw per day),
   then checks the site to find the newest serial that actually has a result, because some days have no draw.
-  It remembers the latest serial it found, so the next search is quicker.
-* **Update PDF Files** downloads n draws starting from the Start Serial No., the same as the Python app.
+* **Update PDF Files** selects n draws starting from the Start Serial No., the same as the Python app.
+
+Every PDF is downloaded **once** and saved in a permanent archive in the browser (IndexedDB), organised by
+draw serial. Both buttons only download the draws that aren't saved yet. "Stored PDF files" shows which
+draws are selected for Analyze. The numbers read from each PDF are also saved, so they're parsed only once.
+Settings (gear icon) shows the archive size and can delete it.
 
 Downloads go through the Cloudflare Worker in `proxy/cloudflare-worker.js`, because the result site blocks
-direct downloads from other websites. The built-in proxy URL is in `js/core.js` (`DEFAULT_PROXY`) and can be
-overridden under Settings (gear icon). Downloaded PDFs are stored in the browser (IndexedDB), like the old
-`pdf-downloads` folder.
+direct downloads from other websites. The built-in proxy URL is in `js/core.js` (`DEFAULT_PROXY`).
+
+## Backtest
+
+The Backtest walks forward through history. It predicts each of the last N draws (default 300) using the
+`window` draws before it (default: No. of Files) with exactly the same algorithm. For each draw it counts
+how many of the 16 combinations appear among that draw's 4-digit numbers, and compares the total with
+what 16 random picks would score. The z value measures how far the result is from random, in "luck units".
+Between -2 and +2 is normal luck. "Compare windows" runs windows 3, 7, 15 and 30 side by side. The first run
+downloads about 330 draws (about 45 MB); after that it runs from the archive in a few seconds.
 
 ## Host on GitHub Pages
 
 ```bash
-cd "D:\soulcast projects\Lottery-Predictor-Web"
-git init
+cd "D:\soulcast projects\lottery-predictor-web-and-mobile"
 git add .
-git commit -m "Lottery Analyzer web app"
-git branch -M main
-git remote add origin https://github.com/<your-user>/lottery-analyzer-web.git
-git push -u origin main
+git commit -m "Describe your change"
+git push
 ```
 
-Then on GitHub, go to **Settings → Pages → Source: Deploy from a branch → main / (root) → Save**.
-After about a minute, the app is live at `https://<your-user>.github.io/lottery-analyzer-web/`.
+Then on GitHub, go to **Settings → Pages → Source: Deploy from a branch → RemoteMain / (root) → Save**.
+After about a minute, the app is live at `https://midhunvijayvs.github.io/lottery-predictor-web-and-mobile/`.
 
 Pages on a free account needs a **public** repo. If you want it private, use GitHub Pro, or
 Netlify / Cloudflare Pages (both free and they work with private repos).

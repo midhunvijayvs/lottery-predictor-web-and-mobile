@@ -1,6 +1,6 @@
 // Service worker: caches the app so it opens offline and is installable.
 // Bump VERSION whenever you change any app file, so phones pick up the update.
-const VERSION = "lottery-analyzer-v4";
+const VERSION = "lottery-analyzer-v5";
 const ASSETS = [
   "./",
   "index.html",

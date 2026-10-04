@@ -13,41 +13,54 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-// IndexedDB = the browser version of the "pdf-downloads" folder
+// IndexedDB "draws" store = permanent archive of result PDFs, keyed by draw serial.
+// Each record: { serial, size, data (PDF bytes), nums (all whole-number words, filled on first parse) }
 const db = (() => {
   let p;
   const open = () => p ??= new Promise((res, rej) => {
-    const r = indexedDB.open("lottery-analyzer", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("pdfs");
+    const r = indexedDB.open("lottery-analyzer", 2);
+    r.onupgradeneeded = (ev) => {
+      const d = r.result, t = r.transaction;
+      const draws = d.objectStoreNames.contains("draws") ? t.objectStore("draws") : d.createObjectStore("draws");
+      if (ev.oldVersion >= 1 && d.objectStoreNames.contains("pdfs")) {
+        // migrate files downloaded by the previous version into the archive
+        const c = t.objectStore("pdfs").openCursor();
+        c.onsuccess = () => {
+          const cur = c.result;
+          if (cur) { const v = cur.value; if (v && v.serial && v.data) draws.put({ serial: v.serial, size: v.size, data: v.data }, v.serial); cur.continue(); }
+          else d.deleteObjectStore("pdfs");
+        };
+      }
+    };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
   const tx = async (mode, fn) => {
     const d = await open();
     return new Promise((res, rej) => {
-      const t = d.transaction("pdfs", mode);
-      const s = t.objectStore("pdfs");
-      const req = fn(s);
+      const t = d.transaction("draws", mode);
+      const req = fn(t.objectStore("draws"));
       t.oncomplete = () => res(req?.result);
       t.onerror = () => rej(t.error);
     });
   };
   return {
-    put: (k, v) => tx("readwrite", (s) => s.put(v, k)),
+    put: (v) => tx("readwrite", (s) => s.put(v, v.serial)),
     get: (k) => tx("readonly", (s) => s.get(k)),
-    del: (k) => tx("readwrite", (s) => s.delete(k)),
+    keys: () => tx("readonly", (s) => s.getAllKeys()),
     clear: () => tx("readwrite", (s) => s.clear()),
-    all: async () => {
+    sizeInfo: async () => {
       const d = await open();
       return new Promise((res, rej) => {
-        const items = [];
-        const r = d.transaction("pdfs").objectStore("pdfs").openCursor();
-        r.onsuccess = () => { const c = r.result; if (c) { items.push([c.key, c.value]); c.continue(); } else res(items); };
+        let n = 0, bytes = 0;
+        const r = d.transaction("draws").objectStore("draws").openCursor();
+        r.onsuccess = () => { const c = r.result; if (c) { n++; bytes += c.value.size || 0; c.continue(); } else res({ n, bytes }); };
         r.onerror = () => rej(r.error);
       });
     },
   };
 })();
+try { navigator.storage?.persist?.(); } catch {} // ask the browser not to evict the archive
 
 // ---------- output screen (add_text_to_output_screen etc.) ----------
 function log(text, color = "green", bold = false) {
@@ -86,18 +99,21 @@ function readInputs() {
   return { count, start };
 }
 
-// ---------- file list ----------
+// ---------- file list (the draws currently selected for Analyze) ----------
+const getSelection = () => LS.get("selection", []);
 async function renderFiles() {
-  const items = (await db.all()).sort((a, b) => a[0] - b[0]);
+  const sel = getSelection();
   const ol = $("fileList");
   ol.innerHTML = "";
-  for (const [k, v] of items) {
+  for (const [k, serial] of sel.entries()) {
+    const rec = await db.get(serial);
     const li = document.createElement("li");
-    li.value = k;
-    li.textContent = `${k}.pdf — ${v.name} (${Math.round(v.size / 1024)} KB)`;
+    li.value = k + 1;
+    li.textContent = rec ? `draw ${serial} (${Math.round(rec.size / 1024)} KB)` : `draw ${serial} — missing`;
     ol.append(li);
   }
-  $("fileSummary").textContent = items.length ? `${items.length} file(s)` : "none";
+  const { n } = await db.sizeInfo();
+  $("fileSummary").textContent = (sel.length ? `${sel.length} file(s)` : "none") + ` · ${n} saved`;
 }
 
 // ---------- Update PDF Files (delete_all_pdfs + downloadPDF + verifyPDFs) ----------
@@ -129,34 +145,45 @@ async function downloadSerial(serial) {
   return buf;
 }
 
-// Shared by both update buttons: download the given serials, then replace the stored files
-async function downloadAndStore(serials, cache = new Map()) {
-  log("Downloading PDF files...");
-  log("------------------------------------------");
-  const got = [];
-  for (const [n, serial] of serials.entries()) {
-    const i = n + 1;
-    log(`Downloading from: ${core.RESULT_URL(serial)}`); await tick();
-    try {
-      const buf = cache.has(serial) ? cache.get(serial) : await downloadSerial(serial);
-      if (!buf) { log(`Skipped ${i}: no result PDF for serial ${serial}.`, "yellow"); continue; }
-      got.push({ name: `draw ${serial}`, serial, size: buf.byteLength, data: buf });
-      log(`Downloaded ${i}.pdf`);
-    } catch (e) {
-      log(`Error downloading ${i}: ${e.message || e}`, "red");
+// Make sure the given draws are in the archive; download only the missing ones (4 at a time).
+// `cache` may already hold bytes fetched while searching for the latest serial.
+async function ensureDraws(serials, cache = new Map(), { quiet = false } = {}) {
+  const have = new Set(await db.keys());
+  const need = serials.filter((s) => !have.has(s));
+  log(`${serials.length - need.length} of ${serials.length} draw(s) already saved — downloading ${need.length}.`);
+  let done = 0, failed = 0;
+  const queue = [...need];
+  const worker = async () => {
+    while (queue.length) {
+      const serial = queue.shift();
+      try {
+        const buf = cache.has(serial) ? cache.get(serial) : await downloadSerial(serial);
+        if (buf) { await db.put({ serial, size: buf.byteLength, data: buf }); have.add(serial); if (!quiet) log(`Downloaded draw ${serial}`); }
+        else { failed++; log(`Skipped: no result PDF for serial ${serial}.`, "yellow"); }
+      } catch (e) { failed++; log(`Error downloading ${serial}: ${e.message || e}`, "red"); }
+      done++;
+      if (quiet && done % 10 === 0) { log(`  downloaded ${done}/${need.length}...`); }
+      await tick();
     }
-  }
-  log("All PDF Downloads completed!!"); newline();
-  if (got.length) {
-    // only now replace the old files (delete_all_pdfs) — so a failed download never wipes them
-    log("Deleting old PDF files..."); await db.clear();
-    for (const [k, v] of got.entries()) await db.put(k + 1, v);
-    log(`Saved ${got.length} new PDF file(s).`); newline();
+  };
+  await Promise.all(Array.from({ length: Math.min(4, need.length) }, worker));
+  if (need.length) log(`Downloads completed: ${need.length - failed} new, ${failed} not available.`);
+  return serials.filter((s) => have.has(s));
+}
+
+// Shared by both update buttons: ensure the draws exist, then select them for Analyze
+async function selectDraws(serials, cache) {
+  log("Updating PDF files...");
+  log("------------------------------------------");
+  const ok = await ensureDraws(serials, cache);
+  if (ok.length) {
+    LS.set("selection", ok);
+    log(`Selected ${ok.length} draw(s) for analysis: ${ok[0]} … ${ok[ok.length - 1]}`, "yellow", true);
   } else {
-    log("Nothing downloaded — your previously stored PDF files were kept.", "yellow"); newline();
+    log("No draws available — the previous selection was kept.", "yellow");
   }
-  await verifyPdfs();
-  return got.length;
+  newline();
+  await renderFiles();
 }
 
 // "Update PDF files" — starting-serial based (same as the Python app)
@@ -164,8 +191,7 @@ async function updatePdfFiles() {
   const inp = readInputs(); if (!inp) return;
   busy(true);
   try {
-    const serials = Array.from({ length: inp.count }, (_, k) => inp.start + k);
-    await downloadAndStore(serials);
+    await selectDraws(Array.from({ length: inp.count }, (_, k) => inp.start + k));
   } finally { busy(false); }
 }
 
@@ -179,7 +205,9 @@ const todayISO = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, lo
 async function findLatestSerial(cache) {
   const known = LS.get("latestKnown", ANCHOR);
   const guess = known.serial + Math.max(0, dayDiff(known.date, todayISO()));
+  const saved = new Set(await db.keys());
   const exists = async (s) => {
+    if (saved.has(s)) return true;
     if (cache.has(s)) return !!cache.get(s);
     log(`  checking serial ${s}...`); await tick();
     const buf = await downloadSerial(s);
@@ -221,27 +249,10 @@ async function updateLatest() {
     newline();
     $("startSerial").value = start;
     readInputs();
-    const serials = Array.from({ length: n }, (_, k) => start + k);
-    await downloadAndStore(serials, cache);
+    await selectDraws(Array.from({ length: n }, (_, k) => start + k), cache);
   } catch (e) {
     log(`Could not find the latest result: ${e.message || e}`, "red", true);
   } finally { busy(false); }
-}
-
-async function verifyPdfs() {
-  log("Verifying PDF files...");
-  const items = await db.all();
-  const kept = [], deleted = [];
-  for (const [k, v] of items) {
-    if (!v.size || !isPdf(v.data)) { await db.del(k); deleted.push(`${k}.pdf`); }
-    else kept.push(`${k}.pdf`);
-  }
-  let report = "Verification Report\n--------------------\n" +
-    `>>> Total files scanned: ${items.length}\n>>> Deleted invalid files: ${deleted.length}\n>>> Valid files kept: ${kept.length}`;
-  if (deleted.length) report += "\n\n>>> Deleted Files:\n" + deleted.join("\n");
-  if (kept.length) report += "\n\n>>> Valid Files:\n" + kept.join("\n");
-  log(report); newline();
-  await renderFiles();
 }
 
 // ---------- Analyze ----------
@@ -257,24 +268,35 @@ async function extractText(buf) {
   return text;
 }
 
+// All whole-number words of one draw (parsed once, then kept in the archive)
+async function drawNumbers(serial) {
+  const rec = await db.get(serial);
+  if (!rec) return null;
+  if (!rec.nums) {
+    rec.nums = core.splitToWordsAndFilterNumbers(await extractText(rec.data));
+    await db.put(rec);
+  }
+  return rec.nums;
+}
+
 async function analyzeAndShow() {
-  const inp = readInputs(); if (!inp) return;
+  const sel = getSelection();
   busy(true);
   try {
     log(" Extracting text from PDF Files...."); newline();
-    const texts = [];
-    for (let i = 1; i <= inp.count; i++) {
-      log(` extracting data from PDF file ${i}.pdf.....`); await tick();
-      const rec = await db.get(i);
-      if (!rec) { log(`File not found: ${i}.pdf`, "red"); continue; }
-      try { texts.push(await extractText(rec.data)); }
-      catch (e) { log(`Could not read ${i}.pdf: ${e.message || e}`, "red"); }
+    const perFile = [];
+    for (const [k, serial] of sel.entries()) {
+      log(` extracting data from PDF file ${k + 1} (draw ${serial}).....`); await tick();
+      try { const nums = await drawNumbers(serial); if (nums) perFile.push(nums); else log(`File not found: draw ${serial}`, "red"); }
+      catch (e) { log(`Could not read draw ${serial}: ${e.message || e}`, "red"); }
     }
     log(" Data extraction Completed!!"); newline();
-    if (!texts.length) { log("No PDF files to analyze. Use Update PDF Files or Add PDFs first.", "red", true); return; }
+    if (!perFile.length) { log("No PDF files to analyze. Use one of the Update buttons first.", "red", true); return; }
 
     log(" Splitting the text data into words and filtering numbers....");
-    const { numbers, four, result } = core.runAnalysis(texts);
+    const numbers = perFile.flat();
+    const four = core.filter4DigitNumbers(numbers);
+    const [D0, D1, D2, D3] = core.analyze(four);
     log(" Data Splitting and filtering completed!!");
     logCollapsible(`The result number word array (${numbers.length}) — tap to expand`, numbers);
     newline();
@@ -282,16 +304,100 @@ async function analyzeAndShow() {
     logCollapsible(`Extracted 4 digit numbers from all the pdf files (${four.length}) — tap to expand`, four);
     newline();
     log("Total number of numbers in the above list: " + four.length);
-    log(`Total number of pdf files: ${texts.length}`);
+    log(`Total number of pdf files: ${perFile.length}`);
     log(`Expected number of 4 digit results per files: ${core.EXPECTED_PER_FILE}`);
-    log(`Total number of expected 4 digit results: ${texts.length} x ${core.EXPECTED_PER_FILE} = ${texts.length * core.EXPECTED_PER_FILE}`);
+    log(`Total number of expected 4 digit results: ${perFile.length} x ${core.EXPECTED_PER_FILE} = ${perFile.length * core.EXPECTED_PER_FILE}`);
     log("------------------------------------------------------------");
     newline();
     log("  Analyzing the data.... ");
 
-    LS.set("lastResult", { ...result, at: new Date().toISOString(), files: texts.length, numbers: four.length });
+    LS.set("lastResult", { D0, D1, D2, D3, at: new Date().toISOString(), files: perFile.length, numbers: four.length });
     showResult();
   } finally { busy(false); }
+}
+
+// ---------- Backtest ----------
+// Walk forward through history: predict each draw from the `w` draws before it with the
+// exact same algorithm, count how many of the 16 combinations appear among that draw's
+// 4-digit numbers, and compare with what random guessing would score.
+function backtestWindow(draws, w, tests) {
+  const first = Math.max(w, draws.length - tests);
+  let hits = 0, expected = 0, variance = 0, n = 0, best = 0, drawsWithHit = 0;
+  for (let i = first; i < draws.length; i++) {
+    const history = draws.slice(i - w, i).flatMap((d) => d.four);
+    const [D0, D1, D2, D3] = core.analyze(history);
+    const { combos } = core.deriveFromResult({ D0, D1, D2, D3 });
+    const winners = new Set(draws[i].four);
+    const h = combos.filter((c) => winners.has(c)).length;
+    const pr = winners.size / 10000;
+    hits += h; expected += combos.length * pr; variance += combos.length * pr * (1 - pr);
+    n++; best = Math.max(best, h); if (h) drawsWithHit++;
+  }
+  const z = variance ? (hits - expected) / Math.sqrt(variance) : 0;
+  return { w, n, hits, expected, z, best, drawsWithHit };
+}
+const verdict = (z) => z >= 3 ? ["Strong", "good"] : z >= 2 ? ["Interesting", "warn"] : z <= -2 ? ["Below random", "bad"] : ["Like random", "neutral"];
+const verdictText = (z) => z >= 3 ? "That is a strong signal — keep testing it on new draws before trusting it."
+  : z >= 2 ? "That is better than usual luck, but not conclusive — re-test it on future draws."
+  : z <= -2 ? "That is worse than random guessing."
+  : "That is within normal luck — no better than picking 16 numbers at random.";
+
+async function runBacktest() {
+  const w = parseInt($("btWindow").value || $("fileCount").value, 10);
+  const tests = parseInt($("btTests").value, 10);
+  if (!(w >= 1 && w <= 60 && tests >= 10 && tests <= 2000)) { log("Input Error!! Window 1–60 and test draws 10–2000.", "red", true); return; }
+  const windows = $("btCompare").checked ? [...new Set([3, 7, 15, 30, w])].sort((a, b) => a - b) : [w];
+  const wMax = Math.max(...windows);
+  busy(true);
+  try {
+    log("Backtest: finding the latest published result...", "yellow", true);
+    const cache = new Map();
+    const latest = await findLatestSerial(cache);
+    const from = latest - tests - wMax + 1;
+    log(`Backtest range: draws ${from} to ${latest} (${latest - from + 1} draws).`);
+    const serials = Array.from({ length: latest - from + 1 }, (_, k) => from + k);
+    const ok = await ensureDraws(serials, cache, { quiet: true });
+
+    log("Reading numbers from the saved PDFs (only new ones need parsing)...");
+    const draws = [];
+    for (const [k, serial] of ok.entries()) {
+      try { draws.push({ serial, four: core.filter4DigitNumbers(await drawNumbers(serial)) }); }
+      catch (e) { log(`Could not read draw ${serial}: ${e.message || e}`, "red"); }
+      if ((k + 1) % 25 === 0) { log(`  read ${k + 1}/${ok.length}`); await tick(); }
+    }
+    log("Running the backtest..."); await tick();
+    const rows = windows.map((win) => backtestWindow(draws, win, tests));
+    const result = { at: new Date().toISOString(), latest, from: draws[0]?.serial, rows, main: w };
+    LS.set("lastBacktest", result);
+    await renderFiles();
+    showBacktest(result);
+    for (const r of rows) log(`Window ${r.w}: ${r.hits} hits in ${r.n} draws, random ≈ ${r.expected.toFixed(1)}, z = ${r.z.toFixed(2)} → ${verdict(r.z)[0]}`, "yellow", true);
+    newline();
+  } catch (e) {
+    log(`Backtest failed: ${e.message || e}`, "red", true);
+  } finally { busy(false); }
+}
+
+function showBacktest(r, scroll = true) {
+  if (!r) return;
+  const tb = $("btTable").querySelector("tbody");
+  tb.innerHTML = "";
+  for (const row of r.rows) {
+    const [label, cls] = verdict(row.z);
+    const tr = document.createElement("tr");
+    if (row.w === r.main) tr.className = "main";
+    tr.innerHTML = `<td>${row.w}</td><td>${row.hits}</td><td>${row.expected.toFixed(0)}</td>` +
+      `<td>${row.z >= 0 ? "+" : ""}${row.z.toFixed(1)}</td><td><span class="pill ${cls}">${label}</span></td>`;
+    tb.append(tr);
+  }
+  const m = r.rows.find((x) => x.w === r.main) || r.rows[0];
+  $("btSummary").textContent =
+    `Using the previous ${m.w} draws to predict each of the last ${m.n} draws, your 16 combinations matched ${m.hits} times. ` +
+    `Random guessing would match about ${m.expected.toFixed(0)} times (±${Math.sqrt(m.expected).toFixed(0)} from luck). ` +
+    `At least one combination matched in ${m.drawsWithHit} of ${m.n} draws; the best single draw had ${m.best}. ${verdictText(m.z)}`;
+  $("btMeta").textContent = `${m.n} test draws (${r.from}–${r.latest}) · run ${new Date(r.at).toLocaleString()}`;
+  $("btBox").hidden = false;
+  if (scroll) $("btBox").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---------- Show (last) result ----------
@@ -403,12 +509,17 @@ function setupTooltips() {
   window.addEventListener("scroll", () => (tip.hidden = true), { passive: true });
 }
 
+function showBacktestSaved() { const r = LS.get("lastBacktest", null); if (r) showBacktest(r, false); }
+
 // ---------- settings ----------
 function openSettings() {
   const s = LS.get("settings", { mode: "1", proxy: "" });
   document.querySelectorAll("input[name=mode]").forEach((r) => (r.checked = r.value === s.mode));
   $("proxyUrl").value = s.proxy || "";
   $("proxyUrl").placeholder = core.DEFAULT_PROXY;
+  db.sizeInfo().then(({ n, bytes }) => ($("archiveInfo").textContent = `${n} draw(s) saved · ${(bytes / 1048576).toFixed(1)} MB`));
+  $("clearArchive").textContent = "Delete saved draws";
+  $("clearArchive").dataset.armed = "";
   $("settingsDlg").showModal();
 }
 $("settingsDlg").addEventListener("close", () => {
@@ -416,6 +527,16 @@ $("settingsDlg").addEventListener("close", () => {
   const mode = document.querySelector("input[name=mode]:checked")?.value || "1";
   LS.set("settings", { mode, proxy: $("proxyUrl").value.trim() });
   log(`Settings saved. Analysis mode option ${mode}.`);
+});
+
+$("clearArchive").addEventListener("click", async () => {
+  const b = $("clearArchive");
+  if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; return; }
+  await db.clear(); LS.set("selection", []);
+  b.dataset.armed = ""; b.textContent = "Deleted";
+  $("archiveInfo").textContent = "0 draw(s) saved · 0.0 MB";
+  log("All saved draws deleted.", "yellow");
+  renderFiles();
 });
 
 // ---------- install button (PWA) ----------
@@ -444,6 +565,8 @@ const syncLatestLabel = () => {
 };
 $("fileCount").addEventListener("input", syncLatestLabel);
 $("analyzeBtn").onclick = analyzeAndShow;
+$("btBtn").onclick = runBacktest;
+$("fileCount").addEventListener("input", () => ($("btWindow").placeholder = $("fileCount").value));
 $("lastBtn").onclick = showResult;
 $("clearBtn").onclick = clearScreen;
 $("settingsBtn").onclick = openSettings;
@@ -456,6 +579,8 @@ window.addEventListener("resize", () => { if (!$("resultBox").hidden) {
 const saved = LS.get("inputs", null);
 if (saved) { $("fileCount").value = saved.count; $("startSerial").value = saved.start; }
 syncLatestLabel();
+$("btWindow").placeholder = $("fileCount").value;
+showBacktestSaved();
 setupTooltips();
 renderFiles();
 log("Lottery Analyzer ready (web version).");

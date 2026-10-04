@@ -32,7 +32,15 @@ const db = (() => {
         };
       }
     };
-    r.onsuccess = () => res(r.result);
+    r.onblocked = () => {
+      // another open copy of the app (old version) is holding the storage
+      log("Storage upgrade is waiting: please close every other open tab/window of this app (and the installed app), then reopen it.", "red", true);
+    };
+    r.onsuccess = () => {
+      const d = r.result;
+      d.onversionchange = () => { d.close(); location.reload(); }; // never block a future upgrade
+      res(d);
+    };
     r.onerror = () => rej(r.error);
   });
   const tx = async (mode, fn) => {
@@ -124,7 +132,8 @@ function isPdf(buf) {
 async function fetchPdf(url) {
   // Proxy first (the result site blocks direct browser downloads), direct fetch as a fallback
   const proxy = (LS.get("settings", {}).proxy || "").trim() || core.DEFAULT_PROXY;
-  const attempts = [() => fetch(proxy + encodeURIComponent(url)), () => fetch(url, { mode: "cors" })];
+  const timed = (u, opt = {}) => fetch(u, { ...opt, signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined });
+  const attempts = [() => timed(proxy + encodeURIComponent(url)), () => timed(url, { mode: "cors" })];
   const errs = [];
   for (const [n, go] of attempts.entries()) {
     try {
@@ -205,6 +214,7 @@ const todayISO = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, lo
 async function findLatestSerial(cache) {
   const known = LS.get("latestKnown", ANCHOR);
   const guess = known.serial + Math.max(0, dayDiff(known.date, todayISO()));
+  log("  opening saved draws..."); await tick();
   const saved = new Set(await db.keys());
   const exists = async (s) => {
     if (saved.has(s)) return true;

@@ -14,54 +14,71 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <header class="top">
-    <img class="banner" src="image.png" alt="Lottery banner">
-    <div class="titlebar">
+  <header class="hero">
+    <svg class="hero-art" viewBox="0 0 120 80" aria-hidden="true">
+      <defs>
+        <radialGradient id="ballP" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#ffb3dc"/><stop offset=".55" stop-color="#ff44aa"/><stop offset="1" stop-color="#a3005a"/></radialGradient>
+        <radialGradient id="ballY" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff6b0"/><stop offset=".55" stop-color="#ffd400"/><stop offset="1" stop-color="#a88a00"/></radialGradient>
+        <radialGradient id="ballG" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#b8ffd6"/><stop offset=".55" stop-color="#2ecc71"/><stop offset="1" stop-color="#14703c"/></radialGradient>
+      </defs>
+      <g class="bars">
+        <rect x="6" y="46" width="9" height="28" rx="2"/><rect x="19" y="34" width="9" height="40" rx="2"/>
+        <rect x="32" y="52" width="9" height="22" rx="2"/><rect x="45" y="26" width="9" height="48" rx="2" class="hot"/>
+      </g>
+      <circle cx="78" cy="30" r="17" fill="url(#ballP)"/><text x="78" y="36" class="num">3</text>
+      <circle cx="104" cy="22" r="12" fill="url(#ballY)"/><text x="104" y="26.5" class="num sm">5</text>
+      <circle cx="100" cy="56" r="14" fill="url(#ballG)"/><text x="100" y="61" class="num">9</text>
+    </svg>
+    <div class="hero-text">
       <h1>Lottery Analyzer</h1>
-      <button id="installBtn" class="btn small ghost" hidden>Install app</button>
+      <p>Digit frequency insights</p>
+    </div>
+    <div class="hero-actions">
+      <button id="installBtn" class="icon-btn" title="Install app" aria-label="Install app" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
+      </button>
+      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
     </div>
   </header>
 
   <main>
     <section class="card controls">
+      <h2>Latest Results Fetch</h2>
       <div class="row">
         <label for="fileCount">No. of Files</label>
         <input id="fileCount" type="number" inputmode="numeric" min="1" max="50" value="7">
       </div>
+      <button id="latestBtn" class="btn full">Update PDF files with latest 7 Results</button>
+
+      <hr>
+      <h2>Starting Serial Based Fetch</h2>
       <div class="row">
-        <label for="startSerial">Start Serial No</label>
+        <label for="startSerial">Start Serial No.</label>
         <input id="startSerial" type="number" inputmode="numeric" min="1" value="74890">
       </div>
+      <button id="updateBtn" class="btn full">Update PDF Files</button>
 
-      <div class="btns">
-        <button id="updateBtn" class="btn">Update PDF Files</button>
-        <button id="addBtn" class="btn">Add PDFs from phone</button>
-        <button id="analyzeBtn" class="btn primary">Analyze!</button>
-        <button id="lastBtn" class="btn">Show Last Result!</button>
-      </div>
-      <input id="filePicker" type="file" accept="application/pdf,.pdf" multiple hidden>
+      <hr>
+      <h2>Analyze</h2>
+      <button id="analyzeBtn" class="btn primary full">Analyze!</button>
 
+      <hr>
       <div class="files">
         <div class="files-head">
-          <span>Stored PDF files</span>
+          <h2>Stored PDF files</h2>
           <span id="fileSummary" class="muted">none</span>
         </div>
         <ol id="fileList" class="file-list"></ol>
       </div>
 
-      <div class="btns secondary">
+      <div class="btns">
+        <button id="lastBtn" class="btn">Show Last Result!</button>
         <button id="clearBtn" class="btn">Clear Screen</button>
-        <button id="settingsBtn" class="btn grey">Settings</button>
       </div>
 
       <a class="link" href="https://www.statelottery.kerala.gov.in/index.php/lottery-result-view" target="_blank" rel="noopener">&gt;&gt;&gt; Goto Kerala Lottery Result official page</a>
-    </section>
-
-    <section id="manualBox" class="card manual" hidden>
-      <h2>Some PDFs could not be downloaded</h2>
-      <p>The download failed for these draws (the draw may not exist yet, or the proxy/site is down). You can tap each link below, save the PDF to your phone, then tap <b>Add PDFs from phone</b> and pick them (in order).</p>
-      <ol id="manualLinks"></ol>
-      <p class="muted">If this keeps happening, check that the Cloudflare download proxy is running (Settings → Download proxy).</p>
     </section>
 
     <section id="resultBox" class="card result" hidden>

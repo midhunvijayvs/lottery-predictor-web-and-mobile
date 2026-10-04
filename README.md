@@ -18,14 +18,16 @@ Verified: on the same 7 PDFs, the web version gives exactly the same result as t
 
 ## Getting the PDFs
 
-* **Update PDF Files** first tries to download directly. The result site usually blocks this from
-  other websites (CORS). When it does, the app lists a link for each draw.
-* **Add PDFs from phone**: open those links, save the PDFs, then pick them all here. They're
-  numbered 1.pdf, 2.pdf … in name order.
-* Optional: deploy `proxy/cloudflare-worker.js` (free Cloudflare Worker) and paste its URL in
-  **Settings → Download proxy**. **Update PDF Files** then downloads automatically.
+* **Update PDF files with latest n Results** (n = No. of Files) finds the newest published draw by itself,
+  then downloads the latest n draws. The app estimates today's serial from the date (one draw per day),
+  then checks the site to find the newest serial that actually has a result, because some days have no draw.
+  It remembers the latest serial it found, so the next search is quicker.
+* **Update PDF Files** downloads n draws starting from the Start Serial No., the same as the Python app.
 
-Downloaded and added PDFs are stored in the browser (IndexedDB), like the old `pdf-downloads` folder.
+Downloads go through the Cloudflare Worker in `proxy/cloudflare-worker.js`, because the result site blocks
+direct downloads from other websites. The built-in proxy URL is in `js/core.js` (`DEFAULT_PROXY`) and can be
+overridden under Settings (gear icon). Downloaded PDFs are stored in the browser (IndexedDB), like the old
+`pdf-downloads` folder.
 
 ## Host on GitHub Pages
 

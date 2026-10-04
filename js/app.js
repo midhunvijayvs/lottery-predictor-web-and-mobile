@@ -73,7 +73,7 @@ function clearScreen() { out.textContent = ""; log("Screen Cleared"); }
 const tick = () => new Promise((r) => setTimeout(r, 0)); // let the UI repaint
 
 function busy(on) {
-  document.querySelectorAll(".controls .btn").forEach((b) => (b.disabled = on));
+  document.querySelectorAll(".controls .btn, #settingsBtn").forEach((b) => (b.disabled = on));
 }
 function readInputs() {
   const count = parseInt($("fileCount").value, 10);
@@ -121,41 +121,110 @@ async function fetchPdf(url) {
   throw new Error(errs.join(" | "));
 }
 
+// Download one draw. Returns the PDF bytes, or null when the site has no result for that serial
+// (the site answers unknown/future serials with an empty file).
+async function downloadSerial(serial) {
+  const { buf, type } = await fetchPdf(core.RESULT_URL(serial));
+  if (buf.byteLength === 0 || (!type.includes("application/pdf") && !isPdf(buf)) || !isPdf(buf)) return null;
+  return buf;
+}
+
+// Shared by both update buttons: download the given serials, then replace the stored files
+async function downloadAndStore(serials, cache = new Map()) {
+  log("Downloading PDF files...");
+  log("------------------------------------------");
+  const got = [];
+  for (const [n, serial] of serials.entries()) {
+    const i = n + 1;
+    log(`Downloading from: ${core.RESULT_URL(serial)}`); await tick();
+    try {
+      const buf = cache.has(serial) ? cache.get(serial) : await downloadSerial(serial);
+      if (!buf) { log(`Skipped ${i}: no result PDF for serial ${serial}.`, "yellow"); continue; }
+      got.push({ name: `draw ${serial}`, serial, size: buf.byteLength, data: buf });
+      log(`Downloaded ${i}.pdf`);
+    } catch (e) {
+      log(`Error downloading ${i}: ${e.message || e}`, "red");
+    }
+  }
+  log("All PDF Downloads completed!!"); newline();
+  if (got.length) {
+    // only now replace the old files (delete_all_pdfs) — so a failed download never wipes them
+    log("Deleting old PDF files..."); await db.clear();
+    for (const [k, v] of got.entries()) await db.put(k + 1, v);
+    log(`Saved ${got.length} new PDF file(s).`); newline();
+  } else {
+    log("Nothing downloaded — your previously stored PDF files were kept.", "yellow"); newline();
+  }
+  await verifyPdfs();
+  return got.length;
+}
+
+// "Update PDF files" — starting-serial based (same as the Python app)
 async function updatePdfFiles() {
   const inp = readInputs(); if (!inp) return;
   busy(true);
   try {
-    log("Downloading PDF files...");
-    log("------------------------------------------");
-    const failed = [], got = [];
-    for (let i = 1; i <= inp.count; i++) {
-      const serial = inp.start + i - 1;
-      const url = core.RESULT_URL(serial);
-      log(`Downloading from: ${url}`); await tick();
-      try {
-        const { buf, type } = await fetchPdf(url);
-        if (!type.includes("application/pdf") && !isPdf(buf)) {
-          log(`Skipped ${i}: Not a PDF file.`, "yellow"); failed.push({ i, serial, url }); continue;
-        }
-        if (buf.byteLength === 0) { log(`Skipped ${i}: empty file.`, "yellow"); failed.push({ i, serial, url }); continue; }
-        got.push([i, { name: `draw ${serial}`, serial, size: buf.byteLength, data: buf }]);
-        log(`Downloaded ${i}.pdf`);
-      } catch (e) {
-        log(`Error downloading ${i}: ${e.message || e}`, "red");
-        failed.push({ i, serial, url });
-      }
+    const serials = Array.from({ length: inp.count }, (_, k) => inp.start + k);
+    await downloadAndStore(serials);
+  } finally { busy(false); }
+}
+
+// ---------- Latest results ----------
+// One draw a day with consecutive serials, but some days have no draw, so the date only gives
+// an estimate. We then probe the site to find the newest serial that really has a result.
+const ANCHOR = { serial: 74890, date: "2025-05-03" }; // KR-704, held 03/05/2025
+const dayDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+const todayISO = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, local time
+
+async function findLatestSerial(cache) {
+  const known = LS.get("latestKnown", ANCHOR);
+  const guess = known.serial + Math.max(0, dayDiff(known.date, todayISO()));
+  const exists = async (s) => {
+    if (cache.has(s)) return !!cache.get(s);
+    log(`  checking serial ${s}...`); await tick();
+    const buf = await downloadSerial(s);
+    cache.set(s, buf);
+    return !!buf;
+  };
+  let lo, hi; // lo = has a result, hi = no result
+  if (await exists(guess)) {
+    lo = guess; let step = 1;
+    while (await exists(lo + step)) { lo += step; step *= 2; if (step > 4096) throw new Error("search ran away"); }
+    hi = lo + step;
+  } else {
+    hi = guess; let step = 1;
+    while (true) {
+      const s = guess - step;
+      if (s <= 0 || step > 8192) throw new Error("could not find any published result");
+      if (await exists(s)) { lo = s; break; }
+      hi = s; step *= 2;
     }
-    log("All PDF Downloads completed!!"); newline();
-    if (got.length) {
-      // only now replace the old files (delete_all_pdfs) — so a blocked download never wipes them
-      log("Deleting old PDF files..."); await db.clear();
-      for (const [k, v] of got) await db.put(k, v);
-      log(`Saved ${got.length} new PDF file(s).`); newline();
-    } else {
-      log("Nothing downloaded — your previously stored PDF files were kept.", "yellow"); newline();
-    }
-    await verifyPdfs();
-    showManual(failed);
+  }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (await exists(mid)) lo = mid; else hi = mid;
+  }
+  LS.set("latestKnown", { serial: lo, date: todayISO() });
+  return lo;
+}
+
+async function updateLatest() {
+  const n = parseInt($("fileCount").value, 10);
+  if (!Number.isInteger(n) || n < 1) { log("Input Error!! Please enter valid numbers.", "red", true); return; }
+  busy(true);
+  try {
+    log(`Finding the latest published result...`);
+    const cache = new Map();
+    const latest = await findLatestSerial(cache);
+    const start = latest - n + 1;
+    log(`Latest result serial: ${latest}. Fetching the latest ${n}: serials ${start} to ${latest}.`, "yellow", true);
+    newline();
+    $("startSerial").value = start;
+    readInputs();
+    const serials = Array.from({ length: n }, (_, k) => start + k);
+    await downloadAndStore(serials, cache);
+  } catch (e) {
+    log(`Could not find the latest result: ${e.message || e}`, "red", true);
   } finally { busy(false); }
 }
 
@@ -173,47 +242,6 @@ async function verifyPdfs() {
   if (kept.length) report += "\n\n>>> Valid Files:\n" + kept.join("\n");
   log(report); newline();
   await renderFiles();
-}
-
-function showManual(failed) {
-  const box = $("manualBox");
-  if (!failed.length) { box.hidden = true; return; }
-  const ol = $("manualLinks");
-  ol.innerHTML = "";
-  for (const f of failed) {
-    const li = document.createElement("li");
-    li.value = f.i;
-    const a = document.createElement("a");
-    a.href = f.url; a.target = "_blank"; a.rel = "noopener";
-    a.textContent = `Draw serial ${f.serial}`;
-    li.append(a);
-    ol.append(li);
-  }
-  box.hidden = false;
-  box.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-// ---------- Add PDFs manually (replaces the files with the picked ones) ----------
-async function addPdfs(files) {
-  if (!files.length) return;
-  busy(true);
-  try {
-    const list = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    await db.clear();
-    let i = 0;
-    for (const f of list) {
-      const buf = await f.arrayBuffer();
-      if (!isPdf(buf)) { log(`Skipped ${f.name}: not a PDF file.`, "yellow"); continue; }
-      i++;
-      await db.put(i, { name: f.name, size: buf.byteLength, data: buf });
-      log(`Added ${f.name} as ${i}.pdf`);
-    }
-    $("fileCount").value = i || $("fileCount").value;
-    readInputs();
-    log(`${i} PDF file(s) ready. Tap Analyze!`, "yellow", true);
-    $("manualBox").hidden = true;
-    await renderFiles();
-  } finally { busy(false); }
 }
 
 // ---------- Analyze ----------
@@ -409,8 +437,12 @@ if ("serviceWorker" in navigator) {
 
 // ---------- wire up ----------
 $("updateBtn").onclick = updatePdfFiles;
-$("addBtn").onclick = () => $("filePicker").click();
-$("filePicker").onchange = (e) => { addPdfs(e.target.files); e.target.value = ""; };
+$("latestBtn").onclick = updateLatest;
+const syncLatestLabel = () => {
+  const n = parseInt($("fileCount").value, 10);
+  $("latestBtn").textContent = `Update PDF files with latest ${Number.isInteger(n) && n > 0 ? n : "n"} Results`;
+};
+$("fileCount").addEventListener("input", syncLatestLabel);
 $("analyzeBtn").onclick = analyzeAndShow;
 $("lastBtn").onclick = showResult;
 $("clearBtn").onclick = clearScreen;
@@ -423,6 +455,7 @@ window.addEventListener("resize", () => { if (!$("resultBox").hidden) {
 
 const saved = LS.get("inputs", null);
 if (saved) { $("fileCount").value = saved.count; $("startSerial").value = saved.start; }
+syncLatestLabel();
 setupTooltips();
 renderFiles();
 log("Lottery Analyzer ready (web version).");
